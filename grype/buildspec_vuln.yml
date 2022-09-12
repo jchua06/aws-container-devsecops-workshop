@@ -1,0 +1,23 @@
+version: 0.2
+
+phases: 
+  pre_build: 
+    commands:
+      - apt-get update 
+      - curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py  
+      - python get-pip.py
+      - pip install awscli
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+      - echo "Copying grype.yml to the application directory"
+      - cp grype.yaml $CODEBUILD_SRC_DIR_AppSource/.grype.yaml
+  build: 
+    commands:
+      - IMAGE=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
+      - docker build $CODEBUILD_SRC_DIR_AppSource -t $IMAGE
+      - docker push $IMAGE
+  post_build:
+    commands:
+      - /usr/local/bin/grype $IMAGE -c $CODEBUILD_SRC_DIR_AppSource/.grype.yaml > scan_results.json
+      - aws lambda invoke --function-name $FUNCTION_ARN --invocation-type RequestResponse --payload file://scan_results.json outfile
+      - /usr/local/bin/grype $IMAGE -c $CODEBUILD_SRC_DIR_AppSource/.grype.yaml -f $FAIL_WHEN
